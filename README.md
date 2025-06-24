@@ -194,27 +194,27 @@ python 04_train_UNI_on_CN.py \
 
 ---
 
-## 1q Gain or 16q Loss vs No CN Classification
+## 1q Gain vs No CN Classification
 
-We also trained a UNI ViT-L/16 classifier to distinguish normal samples with 1q gain or 16q loss from those with no CN event
+We trained a UNI ViT-L/16 classifier to distinguish normal samples with 1q gain from those with no CN event.
 
 ![Side by side comparison of example model inputs: 1q gain vs no CN](img/1q_no_CN_side_by_side.webp)
 
-**Test F1 (normal_1q_or_16q_loss): 0.975**
+**Test F1 (normal_1q): 0.993**
 
 **Command used:**
 
 ```bash
 python 04_train_UNI_on_CN.py \
-  --json Output/normal_1q_or_16q_loss_vs_noCN.json \
+  --json Output/normal_1q_vs_noCN.json \
   --root Output/ndpi_crops \
-  --out_dir Output/ClassificationTraining/uni_16q1q_v_noCN \
+  --out_dir Output/ClassificationTraining/uni_1q_v_noCN \
   --epochs 30 --batch 24 --patience 10
 ```
 
 **Run summary:**
 
-- Best validation F1 (normal_1q_or_16q_loss): 0.985
-- Test F1 (normal_1q_or_16q_loss): 0.975
-- Test F1 (macro): 0.975
-- Epochs trained: 12 (early stopping)
+- Best validation F1 (normal_1q): 0.997
+- Test F1 (normal_1q): 0.993
+- Test F1 (macro): 0.993
+- Epochs trained: 29 (early stopping)

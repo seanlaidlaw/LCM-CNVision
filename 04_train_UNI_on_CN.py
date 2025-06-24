@@ -1,30 +1,16 @@
 #!/usr/bin/env python3
 """
-Fine‑tune the **UNI** ViT‑L/16 foundation model for binary classification of
-breast‑LCM crops using any of the binary classification JSON files.
+Fine-tune the UNI ViT-L/16 foundation model for binary classification of
+breast-LCM histology crops using any of the binary classification JSON files
+generated previously by the pipeline.
 
-This script can train binary classifiers for:
+This script has been used to train binary classifiers for:
 - tumour vs normal classification
 - normal samples with CN events vs normal samples with no CN
 - normal samples with 1q gain vs normal samples with no CN
 - normal samples with 1q or 16q loss vs normal samples with no CN
 
-This patch addresses
-────────────────────
-1. **torchmetrics ≥1.0 API change** – `accuracy()` and `f1_score()` now require
-   a `task` argument. We pass `task="binary"` for our two‑class setting.
-2. **Apple Silicon / MPS** – selects `mps` when available and only enables
-   `pin_memory=True` when the device is CUDA (it is unsupported on MPS & CPU).
-3. **Loader warning silenced** – the pin‑memory logic avoids the earlier
-   runtime warning.
-4. **Early stopping** – stops training when validation accuracy doesn't improve
-   for a specified number of epochs to prevent overfitting.
-5. **Dynamic classification** – automatically detects the two categories from the JSON file
-   and creates appropriate label mappings.
-6. **Stratified split** – ensures each class has at least 3 samples in validation and test sets.
 
-Run examples
-───────────
 ```bash
 export HF_TOKEN=hf_********************************
 # Train tumour vs normal classifier
@@ -54,7 +40,6 @@ python 04_train_UNI_on_CN.py \
   --root Output/ndpi_crops \
   --out_dir runs/uni_normal_1q_vs_noCN \
   --epochs 20 --batch 24 --patience 3
-```
 """
 from __future__ import annotations
 
@@ -83,15 +68,12 @@ from torch.utils.data import Dataset
 from torch.utils.data import WeightedRandomSampler
 from torchmetrics.functional import accuracy as tm_accuracy
 from torchmetrics.functional import f1_score as tm_f1
-# torchmetrics >=1.0 unified functional interface
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Dataset
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 class HistologyCrops(Dataset):
-    """Lazy‑load WEBP crops referenced in the JSON mapping."""
+    """Lazy-load WEBP crops referenced in the JSON mapping."""
 
     def __init__(self, items: list[tuple[Path, int]], transform):
         self.items = items
@@ -107,10 +89,7 @@ class HistologyCrops(Dataset):
         return img, torch.tensor(label, dtype=torch.long)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# UNI backbone
-# ──────────────────────────────────────────────────────────────────────────────
-
+# define class for the UNI model backbone
 def load_uni_backbone(hf_token: str | None = None, freeze: bool = False):
     if hf_token:
         login(token=hf_token, add_to_git_credential=False)
@@ -150,10 +129,7 @@ class UniClassifier(nn.Module):
         return self.head(feat)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Early Stopping
-# ──────────────────────────────────────────────────────────────────────────────
-
+# define class for early stopping if model plateaus
 class EarlyStopping:
     """Early stopping to prevent overfitting."""
 
@@ -198,10 +174,7 @@ class EarlyStopping:
             model.load_state_dict(self.best_weights)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # Helpers
-# ──────────────────────────────────────────────────────────────────────────────
-
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
@@ -333,7 +306,7 @@ def stratified_split(items, val_size=0.15, test_size=0.15, min_samples_per_class
                         )
 
                 print(
-                    f"✓ Validation passed: All classes have at least {min_samples_per_class} samples in val and test sets",
+                    f"Validation passed: All classes have at least {min_samples_per_class} samples in val and test sets",
                 )
                 return result
 
@@ -404,7 +377,7 @@ def stratified_split(items, val_size=0.15, test_size=0.15, min_samples_per_class
                     f"Split successful with smaller sizes after {attempt + 1} additional attempts",
                 )
                 print(
-                    f"✓ Validation passed: All classes have at least {min_samples_per_class} samples in val and test sets",
+                    f"Validation passed: All classes have at least {min_samples_per_class} samples in val and test sets",
                 )
                 return result
 
@@ -461,10 +434,7 @@ def load_binary_classification_data(json_path: Path, root_path: Path) -> tuple[l
     return items, label_map, class0_name, class1_name
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Main
-# ──────────────────────────────────────────────────────────────────────────────
-
+# main function and script entry point
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -491,7 +461,7 @@ def main():
     args = ap.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1 ▸ gather items
+    # Gather items for classification training
     print(f"Loading binary classification data from: {args.json}")
     items, label_map, class0_name, class1_name = load_binary_classification_data(
         args.json, args.root,
@@ -508,7 +478,7 @@ def main():
     train_items, val_items, test_items = stratified_split(items)
     print('Stratified split done.')
 
-    # 2 ▸ model & transforms
+    # Load model and transforms
     encoder, train_tf, eval_tf = load_uni_backbone(
         args.hf_token, args.freeze_encoder,
     )
@@ -526,7 +496,8 @@ def main():
         sample_weights, len(sample_weights), replacement=True,
     )
 
-    # Choose device
+    # Choose device for training preferring
+    # Apple Silicon / MPS > CUDA > CPU
     if torch.backends.mps.is_available():
         device = torch.device('mps')
     elif torch.cuda.is_available():
@@ -560,6 +531,7 @@ def main():
     # Initialize early stopping
     early_stopping = EarlyStopping(patience=args.patience)
 
+    # define best validation F1 score to be updated during training
     best = 0.0
     for ep in range(1, args.epochs + 1):
         model.train()
@@ -571,7 +543,7 @@ def main():
             opt.step()
         sched.step()
 
-        # validation
+        # Validation
         model.eval()
         p, g = [], []
         with torch.no_grad():
@@ -611,7 +583,8 @@ def main():
             print(f"Early stopping triggered after {ep} epochs")
             break
 
-        # save first or best model so we always have a model to test
+        # Save first or best model so we always have a model to test
+        # even if model never reaches decent performance
         if ep == 1 or f1_pos > best:
             best = f1_pos
             torch.save(model.state_dict(), args.out_dir / 'best.pth')
@@ -619,7 +592,7 @@ def main():
     # Restore best model weights
     early_stopping.restore_best_model(model)
 
-    # 3 ▸ test
+    # Perform test on best model using the test dataset
     best_ckpt = args.out_dir / 'best.pth'
     if not best_ckpt.exists():
         print(
@@ -662,7 +635,7 @@ def main():
     }
     with open(args.out_dir / 'metrics.json', 'w') as fp:
         json.dump(metrics, fp, indent=2)
-    print('✓ finished', metrics)
+    print('Finished', metrics)
 
 
 if __name__ == '__main__':
