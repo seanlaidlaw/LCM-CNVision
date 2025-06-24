@@ -196,7 +196,9 @@ python 04_train_UNI_on_CN.py \
 
 ## 1q Gain or 16q Loss vs No CN Classification
 
-We also trained a UNI ViT-L/16 classifier to distinguish normal samples with 1q gain or 16q loss from those with no CN event, achieving:
+We also trained a UNI ViT-L/16 classifier to distinguish normal samples with 1q gain or 16q loss from those with no CN event
+
+![Side by side comparison of example model inputs: 1q gain vs no CN](img/1q_no_CN_side_by_side.webp)
 
 **Test F1 (normal_1q_or_16q_loss): 0.975**
 
