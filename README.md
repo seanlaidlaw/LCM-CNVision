@@ -11,7 +11,7 @@ The project consists of these training scripts that work in sequence to:
 1. **Pair slide images (.ndpi) with their most recent free-form annotations (.ndpa)** (`01_get_ndpa_pairs.py`)
 2. **Extract a cropped image from the cut area (determined from the coordinates of the annotated regions)** (`02_extract_cuts_from_slide_scan.py`)
 3. **Map samples to copy number events (1q gain or no CN event)** (`03_map_slide_to_CN.py`)
-4. **Train a machine learning model to classify 1q gain events** (`04_train_model.py`)
+4. **Train a machine learning model to classify copy number events (like 1q gain)** (`04_train_model.py`)
 
 ## Script Descriptions
 
@@ -162,7 +162,7 @@ The project expects the following directory structure:
 
 ## Notes
 
-- The pipeline is designed for breast cancer LCM (Laser Capture Microdissection) samples
+- The pipeline is designed for breast epithelium slides
 - Sample IDs must match between the spreadsheets and image filenames
 - The system automatically handles filename variations and coordinate transformations
 - Output images are optimized for storage efficiency using WebP format
@@ -185,3 +185,34 @@ python 04_train_UNI_on_CN.py \
   --out_dir Output/ClassificationTraining/uni_tumour_vs_normal \
   --epochs 20 --batch 24 --patience 10
 ```
+
+**Run summary:**
+
+- Best validation F1 (normal): 0.986
+- Test F1 (macro): 0.979
+- Epochs trained: 20
+
+---
+
+## 1q Gain or 16q Loss vs No CN Classification
+
+We also trained a UNI ViT-L/16 classifier to distinguish normal samples with 1q gain or 16q loss from those with no CN event, achieving:
+
+**Test F1 (normal_1q_or_16q_loss): 0.975**
+
+**Command used:**
+
+```bash
+python 04_train_UNI_on_CN.py \
+  --json Output/normal_1q_or_16q_loss_vs_noCN.json \
+  --root Output/ndpi_crops \
+  --out_dir Output/ClassificationTraining/uni_16q1q_v_noCN \
+  --epochs 30 --batch 24 --patience 10
+```
+
+**Run summary:**
+
+- Best validation F1 (normal_1q_or_16q_loss): 0.985
+- Test F1 (normal_1q_or_16q_loss): 0.975
+- Test F1 (macro): 0.975
+- Epochs trained: 12 (early stopping)

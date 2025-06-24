@@ -600,11 +600,11 @@ def main():
         print(f"  F1 scores shape: {f1s.shape}, values: {f1s.tolist()}")
 
         if f1s.numel() >= 2:
-            f1_pos = f1s[1].item()  # F1 for positive class
+            f1_pos = f1s[0].item()  # F1 for minority/target class (class 0)
         else:
             # Fallback: use macro F1 (scalar)
             f1_pos = float(f1s)
-        print(f"Epoch {ep}/{args.epochs}  val_f1_{class1_name}={f1_pos:.4f}")
+        print(f"Epoch {ep}/{args.epochs}  val_f1_{class0_name}={f1_pos:.4f}")
 
         # Check early stopping (now on F1-positive)
         if early_stopping(f1_pos, model):
@@ -639,7 +639,7 @@ def main():
     preds, gts = torch.cat(p), torch.cat(g)
     f1s = tm_f1(preds, gts, task='binary', average='none')
     if f1s.numel() >= 2:
-        f1_pos = f1s[1].item()
+        f1_pos = f1s[0].item()
     else:
         f1_pos = float(f1s)
 
@@ -653,9 +653,9 @@ def main():
         json.dump(classification_info, fp, indent=2)
 
     metrics = {
-        f"test_f1_{class1_name}": f1_pos,
+        f"test_f1_{class0_name}": f1_pos,
         'test_f1_macro': tm_f1(preds, gts, task='binary').item(),
-        f"best_val_f1_{class1_name}": best,
+        f"best_val_f1_{class0_name}": best,
         'epochs_trained': ep,
         'class0_name': class0_name,
         'class1_name': class1_name,
