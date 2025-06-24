@@ -13,7 +13,9 @@ dependencies:
   - cffi=1.17.1
   - cfitsio=4.6.2
   - dav1d=1.2.1
+  - debugpy=1.8.14
   - epoxy=1.5.10
+  - et_xmlfile=2.0.0
   - fftw=3.3.10
   - font-ttf-dejavu-sans-mono=2.37
   - font-ttf-inconsolata=3.000
@@ -90,6 +92,7 @@ dependencies:
   - nspr=4.36
   - nss=3.113
   - openjpeg=2.5.3
+  - openpyxl=3.1.5
   - openslide=4.0.0
   - openslide-python=1.4.2
   - openssl=3.5.0

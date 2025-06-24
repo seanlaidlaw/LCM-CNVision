@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
 """
-Generate a JSON mapping of breast‑LCM samples to their copy‑number status (1q gain or no CN event) and
-associate each sample with the available cropped histology image(s) plus key metadata.
+Generate four JSON mappings of breast‑LCM samples with binary classifications,
+associating each sample with available cropped histology image(s) plus key metadata.
 
 The script expects three inputs:
   1. The copy‑number events spreadsheet (xlsx) – must contain columns:
         • Sample – unique sample ID, matching the filenames in the crop directory
         • Event  – e.g. "1q gain", "16q loss", … (may contain NaNs for no CN call)
+        • Tumour – "Y" for tumor samples, "N" for normal samples
   2. The master section‑details spreadsheet (xlsx) – must contain:
         • sampleID (unique sample ID, same as above)
         • Patient_Category, PD_ID, Slide_Description, Tissue_Type – the metadata to copy
   3. The root directory containing the cropped WEBP images (all sub‑folders will be searched
      recursively).
 
-It produces a JSON file with the following hierarchical structure and saves it to --out:
+It produces four JSON files with binary classifications:
+- tumour_vs_normal.json: tumour vs normal classification
+- normal_CN_vs_noCN.json: normal samples with any CN event vs normal samples with no CN
+- normal_1q_vs_noCN.json: normal samples with 1q gain vs normal samples with no CN
+- normal_1q_or_16q_loss_vs_noCN.json: normal samples with 1q gain or 16q loss vs normal samples with no CN
+
+Each JSON has the structure:
 {
-  "1q": {
+  "tumour": {
     "<sampleID>": {
       "paths": [<webp‑path>, …],
       "Patient_Category": …,
@@ -25,7 +32,7 @@ It produces a JSON file with the following hierarchical structure and saves it t
     },
     …
   },
-  "no CN": {
+  "normal": {
     "<sampleID>": { … },
     …
   }
@@ -37,7 +44,7 @@ python 03_map_slide_to_CN.py \
     --cn Data/copy_number_events_GRCh38_211108.xlsx \
     --master Data/Breast_LCM_Section_Details_210323.xlsx \
     --slides Output/ndpi_crops \
-    --out Data/sample_event_mapping.json
+    --out_dir Data/
 """
 from __future__ import annotations
 
@@ -77,13 +84,29 @@ def build_crop_index(slide_root: Path) -> dict[str, list[str]]:
     return crop_index
 
 
+def save_json(data: dict, filepath: Path, description: str):
+    """Save data to JSON file and print summary."""
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    with filepath.open('w', encoding='utf-8') as fp:
+        json.dump(data, fp, indent=2)
+
+    # Count samples in each category
+    counts = {k: len(v) for k, v in data.items()}
+    total = sum(counts.values())
+    print(
+        f"✓ Wrote {description}: {filepath} with {total} total samples → {filepath.stat().st_size} bytes",
+    )
+    for category, count in counts.items():
+        print(f"  - {category}: {count} samples")
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Main routine
 # ──────────────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Generate JSON mapping of samples to CN status & crops',
+        description='Generate four JSON mappings with binary classifications: tumour vs normal, normal CN vs no CN, normal 1q vs no CN, normal 1q or 16q loss vs no CN',
     )
     parser.add_argument(
         '--cn', required=True,
@@ -97,7 +120,10 @@ def main():
         '--slides', required=True, type=Path,
         help='Root directory of ndpi_crops',
     )
-    parser.add_argument('--out', required=True, help='Output JSON path')
+    parser.add_argument(
+        '--out_dir', required=True, type=Path,
+        help='Output directory for JSON files',
+    )
     args = parser.parse_args()
 
     # 1. Read spreadsheets
@@ -108,28 +134,53 @@ def main():
     cn_df.columns = cn_df.columns.str.strip()
     master_df.columns = master_df.columns.str.strip()
 
-    # 2. Determine sample → event status (keep only the first event per sample if duplicates exist)
+    # 2. Determine sample classifications (keep only the first event per sample if duplicates exist)
     cn_events = cn_df.groupby('Sample', as_index=False).first()
 
-    # Identify 1q‑gain samples
+    # Create sample classification mappings
+    samples_tumour = set(
+        cn_events.loc[cn_events['Tumour'] == 'Y', 'Sample'],
+    )
+
+    samples_normal = set(
+        cn_events.loc[cn_events['Tumour'] == 'N', 'Sample'],
+    )
+
+    samples_with_cn_event = set(
+        cn_events.loc[cn_events['Event'].notna(), 'Sample'],
+    )
+
     samples_1q = set(
         cn_events.loc[
             cn_events['Event'].str.contains(
                 '1q_gain', case=False, na=False,
             ), 'Sample',
         ],
-    )  # type: ignore
+    )
 
-    # Identify samples with *any* CN call (non‑null event)
-    samples_with_cn_call = set(
-        cn_events.loc[cn_events['Event'].notna(), 'Sample'],
-    )  # type: ignore
+    samples_16q_loss = set(
+        cn_events.loc[
+            cn_events['Event'].str.contains(
+                '16q_loss', case=False, na=False,
+            ), 'Sample',
+        ],
+    )
+
+    samples_either_1q_or_16q_loss = samples_1q.union(samples_16q_loss)
+
+    # All samples in events spreadsheet
+    samples_in_events = set(cn_events['Sample'])
 
     # 3. Build crop index
     crop_index = build_crop_index(args.slides)
 
-    # 4. Build output structure
-    output: dict[str, dict[str, dict]] = {'1q': {}, 'no CN': {}}
+    # 4. Initialize output structures
+    tumour_vs_normal = {'tumour': {}, 'normal': {}}
+    normal_cn_vs_nocn = {'normal_with_CN': {}, 'normal_no_CN': {}}
+    normal_1q_vs_nocn = {'normal_1q': {}, 'normal_no_CN': {}}
+    normal_1q_or_16q_loss_vs_nocn = {
+        'normal_1q_or_16q_loss': {}, 'normal_no_CN': {},
+    }
 
     metadata_cols = [
         'Patient_Category',
@@ -147,24 +198,61 @@ def main():
         md = {col: row.get(col, None) for col in metadata_cols}
         md['paths'] = paths
 
-        # Decide event bucket
-        if sample_id in samples_1q:
-            bucket = '1q'
-        elif sample_id not in samples_with_cn_call:
-            bucket = 'no CN'
-        else:
-            # Has a CN event but not 1q – skip
-            continue
+        # Classification 1: tumour vs normal
+        if sample_id in samples_tumour:
+            tumour_vs_normal['tumour'][sample_id] = md
+        elif sample_id in samples_normal or sample_id not in samples_in_events:
+            tumour_vs_normal['normal'][sample_id] = md
 
-        output[bucket][sample_id] = md
+            # Classification 2: normal CN vs no CN
+            if sample_id in samples_with_cn_event:
+                normal_cn_vs_nocn['normal_with_CN'][sample_id] = md
+            else:
+                normal_cn_vs_nocn['normal_no_CN'][sample_id] = md
 
-    # 5. Save JSON
-    out_path = Path(args.out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open('w', encoding='utf-8') as fp:
-        json.dump(output, fp, indent=2)
+            # Classification 3: normal 1q vs no CN
+            if sample_id in samples_1q:
+                normal_1q_vs_nocn['normal_1q'][sample_id] = md
+            elif sample_id not in samples_with_cn_event:
+                normal_1q_vs_nocn['normal_no_CN'][sample_id] = md
+
+            # Classification 4: normal 1q or 16q loss vs no CN
+            if sample_id in samples_either_1q_or_16q_loss:
+                normal_1q_or_16q_loss_vs_nocn['normal_1q_or_16q_loss'][sample_id] = md
+            elif sample_id not in samples_with_cn_event:
+                normal_1q_or_16q_loss_vs_nocn['normal_no_CN'][sample_id] = md
+
+    # 5. Save all JSON files
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+
+    save_json(
+        tumour_vs_normal, args.out_dir /
+        'tumour_vs_normal.json', 'tumour vs normal classification',
+    )
+    save_json(
+        normal_cn_vs_nocn, args.out_dir /
+        'normal_CN_vs_noCN.json', 'normal CN vs no CN classification',
+    )
+    save_json(
+        normal_1q_vs_nocn, args.out_dir /
+        'normal_1q_vs_noCN.json', 'normal 1q vs no CN classification',
+    )
+    save_json(
+        normal_1q_or_16q_loss_vs_nocn, args.out_dir /
+        'normal_1q_or_16q_loss_vs_noCN.json', 'normal 1q or 16q loss vs no CN classification',
+    )
+
+    # Print overall summary
+    print(f"\nOverall Summary:")
     print(
-        f"✓ Wrote {out_path} with {sum(len(v) for v in output.values())} samples → {out_path.stat().st_size} bytes",
+        f"  Total samples processed: {len(tumour_vs_normal['tumour']) + len(tumour_vs_normal['normal'])}",
+    )
+    print(f"  Tumour samples: {len(tumour_vs_normal['tumour'])}")
+    print(f"  Normal samples: {len(tumour_vs_normal['normal'])}")
+    print(f"  Normal with any CN: {len(normal_cn_vs_nocn['normal_with_CN'])}")
+    print(f"  Normal with 1q: {len(normal_1q_vs_nocn['normal_1q'])}")
+    print(
+        f"  Normal with 1q or 16q loss: {len(normal_1q_or_16q_loss_vs_nocn['normal_1q_or_16q_loss'])}",
     )
 
 
